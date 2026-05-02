@@ -77,7 +77,9 @@
 
 8. **其他参数典型值**（以上没提及的一般保持默认）  
    - `similarity_threshold`：匹配相似度阈值
-   - `hotkey_stop`：停止脚本的热键
+   - `hotkey_stop`：停止脚本的热键。
+     - 该项用于在 `generate_default_config` 函数中创建默认的停止热键 `"ctrl+shift+z"`，您可修改此值为自定义的热键组合
+     - 脚本在 `init_config_and_templates` 函数中会从配置文件里查找 `hotkey_stop` 项。如果由于配置缺失或修改不当导致该项不存在，程序会自动将其替换为 `"ctrl+shift+x"` 以保证脚本能被正常终止。这可以在一定程度上预防因与系统热键冲突而导致默认热键失效的问题
    - `drag_poll_interval`：拖动前轮询间隔
    - `max_rounds`：自动重启轮次
    - `drag_max_wait`：拖动前最大等待时间
