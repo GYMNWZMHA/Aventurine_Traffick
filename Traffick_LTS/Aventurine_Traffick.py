@@ -159,7 +159,7 @@ def hotkey_listener():
         print("\n[热键] 暂停命令已接收")
 
     hotkey_pause = config.get('hotkey_pause', 'ctrl+shift+p')
-    hotkey_stop = config.get('hotkey_stop', 'ctrl+shift+x')
+    hotkey_stop = config.get('hotkey_stop', 'ctrl+shift+z')
 
     try:
         # 注册全局热键
