@@ -108,7 +108,7 @@ def generate_default_config():
         ],
         "similarity_threshold": 0.8,
         "drag_set_B": {"from": {"x": 2100, "y": 1600}, "to": {"x": 2900, "y": 1600}, "duration": 0.15},
-        "hotkey_stop": "ctrl+shift+z",
+        "hotkey_stop": "ctrl+shift+x",
         "drag_poll_interval": 0.4,
         "max_rounds": 30,
         "drag_max_wait": 3.5
