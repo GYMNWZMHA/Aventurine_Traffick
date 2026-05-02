@@ -13,8 +13,8 @@ import win32gui
 import win32console
 import win32con
 from colorama import init, Fore, Back, Style
-
-
+import threading
+from queue import Queue
 
 # ========== 底层设置 ==========
 
@@ -84,6 +84,12 @@ def save_accumulated(total_sec, total_net):
 
 # 配置
 config_file = os.path.join(script_dir, "config.json")
+try:
+    with open(config_file, 'r', encoding='utf-8') as f:
+        config = json.load(f)
+except Exception as e:
+    print(f'加载配置文件时出错: {e}')
+
 def generate_default_config():
     default_config = {
         "screen": {"width": 3072, "height": 1920},
@@ -137,15 +143,44 @@ def ensure_file():
         print(Back.GREEN + "默认配置文件校验完毕")
 ensure_file()
 
+command_queue = Queue()
+hotkey_pause: str | None = None
+hotkey_stop: str | None = None
+
+def hotkey_listener():
+    """独立线程监听热键"""
+    global hotkey_pause
+    global hotkey_stop
+    def on_pause():
+        command_queue.put('pause')
+        print("\n[热键] 暂停命令已接收")
+    def on_stop():
+        command_queue.put('stop')
+        print("\n[热键] 暂停命令已接收")
+
+    hotkey_pause = config.get('hotkey_pause', 'ctrl+shift+p')
+    hotkey_stop = config.get('hotkey_stop', 'ctrl+shift+x')
+
+    try:
+        # 注册全局热键
+        keyboard.add_hotkey(hotkey_pause, on_pause)
+        keyboard.add_hotkey(hotkey_stop, on_stop)
+
+        print(Back.GREEN + f"已注册暂停热键：{hotkey_pause}")
+        print(Back.GREEN + f"已注册停止热键：{hotkey_stop}")
+    except Exception as e:
+        print(Back.RED + f"热键注册失败: {e}")
+        exit(-1)
+
+    # 保持线程运行
+    keyboard.wait()
+
 # 导入
 def init_config_and_templates():
     global stop_requested
 
     os.chdir(script_dir)
     print(Back.GREEN + f"当前工作目录：{os.getcwd()}")
-
-    with open(config_file, 'r', encoding='utf-8') as f:
-        config = json.load(f)
 
     screen_w, screen_h = pyautogui.size()
     print(Back.GREEN + f"检测到屏幕分辨率：{screen_w}x{screen_h}")
@@ -159,7 +194,6 @@ def init_config_and_templates():
     template_path_Sx = config.get('template_image_Sx', 'target_Sx_3k.png')
     similarity_threshold = config.get('similarity_threshold', 0.8)
     drag_set_B = config['drag_set_B']
-    hotkey_stop = config.get('hotkey_stop', 'ctrl+shift+x')
     drag_poll_interval = config.get('drag_poll_interval', 0.2)
     drag_max_wait = config.get('drag_max_wait', 3.0)
     count_regions = config.get('count_regions', [])
@@ -188,12 +222,9 @@ def init_config_and_templates():
         MAX_ROUNDS = 100
         print(Back.RED + "警告：max_rounds 配置无效，已重置为 100")
 
-    keyboard.add_hotkey(hotkey_stop, stop_script)
-    print(Back.GREEN + f"已注册停止热键：{hotkey_stop}")
-
     return (click_set_A, template_M, template_L1, template_L2, template_L3,
             template_S1, template_Sx, similarity_threshold, drag_set_B, drag_poll_interval,
-            drag_max_wait, hotkey_stop, count_regions, MAX_ROUNDS)
+            drag_max_wait, count_regions, MAX_ROUNDS)
 
 # 守门员
 global_counter = load_global_counter()
@@ -213,15 +244,16 @@ def hello():
         print(Back.RED + "该颜色为系统配置失败，出现此类问题可能导致程序崩溃，建议重启以尝试解决或联系至作者寻求帮助")
         print(Fore.BLUE + "该颜色为常数提示")
         print(Back.BLUE + "该颜色为全局常数提示")
-        start_sleep = 2
+        start_sleep = 5
         print(Fore.GREEN + f"{start_sleep}秒后正式启动")
         time.sleep(start_sleep)
-if os.path.exists(GLOBAL_COUNTER_FILE) and os.path.exists(ACCUMULATED_FILE) and os.path.exists(config_file):
-    hello()
-else:
-    ensure_file()
-    print(Back.RED + "已尝试恢复，如有异常请立刻终止程序")
-    hello()
+def say_hello():
+    if os.path.exists(GLOBAL_COUNTER_FILE) and os.path.exists(ACCUMULATED_FILE) and os.path.exists(config_file):
+        hello()
+    else:
+        ensure_file()
+        print(Back.RED + "已尝试恢复，如有异常请立刻终止程序")
+        hello()
 
 
 
@@ -444,14 +476,12 @@ def print_run_summary(start_time, start_global_counter, global_counter, total_se
         print(Back.RED + f"累计时长不足1分钟，无法计算效率")
     return new_total_sec, new_total_net
 
-
-
 # ========== 主程序 ==========
 def main():
     global stop_requested
     (click_set_A, template_M, template_L1, template_L2, template_L3,
      template_S1, template_Sx, similarity_threshold, drag_set_B, drag_poll_interval,
-     drag_max_wait, hotkey_stop, count_regions, MAX_ROUNDS) = init_config_and_templates()
+     drag_max_wait, count_regions, MAX_ROUNDS) = init_config_and_templates()
 
     executor = ThreadPoolExecutor(max_workers=5)
     global_counter = load_global_counter()
@@ -460,12 +490,17 @@ def main():
     start_global_counter = global_counter
     counter = 0
     round_count = 0
+    paused = False
+
+    hotkey_thread = threading.Thread(target=hotkey_listener, daemon=True)
+    hotkey_thread.start()
 
     # 重启
     def restart_script():
         save_global_counter(global_counter)
         nonlocal total_sec, total_net
         keyboard.remove_hotkey(hotkey_stop)
+        keyboard.remove_hotkey(hotkey_pause)
         print(Fore.GREEN + f"已达到预设轮次 {MAX_ROUNDS}，即将重启脚本...")
         new_total_sec, new_total_net = print_run_summary(start_time, start_global_counter, global_counter, total_sec, total_net)
         total_sec, total_net = new_total_sec, new_total_net
@@ -483,10 +518,32 @@ def main():
     counter = new_counter
     global_counter += delta_net
 
+    say_hello()
+
     print("开始主循环...")
     time.sleep(1)
     try:
         while not stop_requested:
+           # 暂停
+            while not command_queue.empty():
+                cmd = command_queue.get()
+                if cmd == 'pause':
+                    paused = not paused
+                    print(f"\n{'⏸️ 暂停' if paused else '▶️ 继续'}")
+                elif cmd == 'stop':
+                    stop_script()
+                
+            while paused and not stop_requested:
+                # 仍然检查命令队列
+                while not command_queue.empty():
+                    cmd = command_queue.get()
+                    if cmd == 'pause':
+                        paused = False
+                        print("\n▶️ 继续")
+                    elif cmd == 'stop':
+                        stop_script()
+                time.sleep(0.1)
+
             round_count += 1
             if round_count >= MAX_ROUNDS:
                 print(Fore.GREEN + f"已达到预设轮次 {MAX_ROUNDS}")
